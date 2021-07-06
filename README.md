@@ -1,6 +1,6 @@
 # Couchbase Gocb Opentelemetry
 
-This is the official Couchbase Go OpenTelemetry wrapper for use with the [http://github.com/couchbase/gocb](Couchbase Go Client).
+This is the official Couchbase Go OpenTelemetry wrapper for use with the [http://github.com/couchbase/gocb] (Couchbase Go Client).
 
 This repository provides wrappers for tracing and metrics and will remain v0.x until a time when Opentelemetry Go itself is stable.
 
