@@ -4,18 +4,19 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"os"
+	"sort"
+	"testing"
+	"time"
+
 	"github.com/couchbase/gocb/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/sdk/export/trace"
-	"go.opentelemetry.io/otel/sdk/export/trace/tracetest"
+	"go.opentelemetry.io/otel/sdk/trace"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	"os"
-	"sort"
-	"testing"
-	"time"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
 func envFlagString(envName, name, value, usage string) *string {
@@ -82,7 +83,7 @@ func TestOpenTelemetryTracer(t *testing.T) {
 	require.Nil(t, err)
 
 	// Force flush the processor and then reset the exporter so that we only get spans that we want.
-	bsp.ForceFlush()
+	bsp.ForceFlush(ctx)
 	exporter.Reset()
 
 	ctx, span := tracer.Start(ctx, "myparentoperation")
@@ -92,7 +93,7 @@ func TestOpenTelemetryTracer(t *testing.T) {
 	require.Nil(t, err)
 	span.End()
 
-	bsp.ForceFlush()
+	bsp.ForceFlush(ctx)
 	spans := exporter.GetSpans()
 	if len(spans) != 5 {
 		t.Fatalf("Expected 5 spans but got %d", len(spans))
