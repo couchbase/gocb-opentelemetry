@@ -18,7 +18,9 @@ type OpenTelemetryMeter struct {
 
 func NewOpenTelemetryMeter(provider metric.MeterProvider) *OpenTelemetryMeter {
 	return &OpenTelemetryMeter{
-		wrapped: provider.Meter("com.couchbase.client/go"),
+		wrapped:       provider.Meter("com.couchbase.client/go"),
+		counterCache:  make(map[string]*OpenTelemetryCounter),
+		recorderCache: make(map[string]*OpenTelemetryMeterValueRecorder),
 	}
 }
 
@@ -37,7 +39,6 @@ func (meter *OpenTelemetryMeter) Counter(name string, tags map[string]string) (g
 		}
 		counter = NewOpenTelemetryCounter(context.Background(), otCounter)
 		meter.counterCache[key] = counter
-		meter.lock.Unlock()
 	}
 	meter.lock.Unlock()
 
@@ -59,7 +60,6 @@ func (meter *OpenTelemetryMeter) ValueRecorder(name string, tags map[string]stri
 		}
 		recorder = NewOpenTelemetryValueRecorder(context.Background(), otRecorder)
 		meter.recorderCache[key] = recorder
-		meter.lock.Unlock()
 	}
 	meter.lock.Unlock()
 
