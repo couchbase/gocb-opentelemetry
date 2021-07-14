@@ -55,9 +55,11 @@ func (meter *OpenTelemetryMeter) ValueRecorder(name string, tags map[string]stri
 			meter.lock.Unlock()
 			return nil, err
 		}
+		var labels []attribute.KeyValue
 		for k, v := range tags {
-			otRecorder.Bind(attribute.String(k, v))
+			labels = append(labels, attribute.String(k, v))
 		}
+		otRecorder.Bind(labels...)
 		recorder = NewOpenTelemetryValueRecorder(context.Background(), otRecorder)
 		meter.recorderCache[key] = recorder
 	}
