@@ -9,21 +9,24 @@ import (
 	"sync"
 )
 
+// OpenTelemetryMeter is an implementation of the gocb Meter interface which wraps an OpenTelemetry meter.
 type OpenTelemetryMeter struct {
 	wrapped       metric.Meter
-	counterCache  map[string]*OpenTelemetryCounter
-	recorderCache map[string]*OpenTelemetryMeterValueRecorder
+	counterCache  map[string]*openTelemetryCounter
+	recorderCache map[string]*openTelemetryMeterValueRecorder
 	lock          sync.Mutex
 }
 
+// NewOpenTelemetryMeter creates a new OpenTelemetryMeter.
 func NewOpenTelemetryMeter(provider metric.MeterProvider) *OpenTelemetryMeter {
 	return &OpenTelemetryMeter{
 		wrapped:       provider.Meter("com.couchbase.client/go"),
-		counterCache:  make(map[string]*OpenTelemetryCounter),
-		recorderCache: make(map[string]*OpenTelemetryMeterValueRecorder),
+		counterCache:  make(map[string]*openTelemetryCounter),
+		recorderCache: make(map[string]*openTelemetryMeterValueRecorder),
 	}
 }
 
+// Counter provides a wrapped OpenTelemetry Counter.
 func (meter *OpenTelemetryMeter) Counter(name string, tags map[string]string) (gocb.Counter, error) {
 	key := fmt.Sprintf("%s-%s", name, tags)
 	meter.lock.Lock()
@@ -37,7 +40,7 @@ func (meter *OpenTelemetryMeter) Counter(name string, tags map[string]string) (g
 		for k, v := range tags {
 			otCounter.Bind(attribute.String(k, v))
 		}
-		counter = NewOpenTelemetryCounter(context.Background(), otCounter)
+		counter = newOpenTelemetryCounter(context.Background(), otCounter)
 		meter.counterCache[key] = counter
 	}
 	meter.lock.Unlock()
@@ -45,6 +48,7 @@ func (meter *OpenTelemetryMeter) Counter(name string, tags map[string]string) (g
 	return counter, nil
 }
 
+// ValueRecorder provides a wrapped OpenTelemetry ValueRecorder.
 func (meter *OpenTelemetryMeter) ValueRecorder(name string, tags map[string]string) (gocb.ValueRecorder, error) {
 	key := fmt.Sprintf("%s-%s", name, tags)
 	meter.lock.Lock()
@@ -60,7 +64,7 @@ func (meter *OpenTelemetryMeter) ValueRecorder(name string, tags map[string]stri
 			labels = append(labels, attribute.String(k, v))
 		}
 		otRecorder.Bind(labels...)
-		recorder = NewOpenTelemetryValueRecorder(context.Background(), otRecorder)
+		recorder = newOpenTelemetryValueRecorder(context.Background(), otRecorder)
 		meter.recorderCache[key] = recorder
 	}
 	meter.lock.Unlock()
@@ -68,35 +72,35 @@ func (meter *OpenTelemetryMeter) ValueRecorder(name string, tags map[string]stri
 	return recorder, nil
 }
 
-type OpenTelemetryCounter struct {
+type openTelemetryCounter struct {
 	ctx     context.Context
 	wrapped metric.Int64Counter
 }
 
-func NewOpenTelemetryCounter(ctx context.Context, counter metric.Int64Counter) *OpenTelemetryCounter {
-	return &OpenTelemetryCounter{
+func newOpenTelemetryCounter(ctx context.Context, counter metric.Int64Counter) *openTelemetryCounter {
+	return &openTelemetryCounter{
 		ctx:     ctx,
 		wrapped: counter,
 	}
 }
 
-func (nm *OpenTelemetryCounter) IncrementBy(num uint64) {
+func (nm *openTelemetryCounter) IncrementBy(num uint64) {
 	nm.wrapped.Add(nm.ctx, int64(num), attribute.KeyValue{Key: "system", Value: attribute.StringValue("couchbase")})
 }
 
-type OpenTelemetryMeterValueRecorder struct {
+type openTelemetryMeterValueRecorder struct {
 	ctx     context.Context
 	wrapped metric.Int64ValueRecorder
 }
 
-func NewOpenTelemetryValueRecorder(ctx context.Context, valueRecorder metric.Int64ValueRecorder) *OpenTelemetryMeterValueRecorder {
-	return &OpenTelemetryMeterValueRecorder{
+func newOpenTelemetryValueRecorder(ctx context.Context, valueRecorder metric.Int64ValueRecorder) *openTelemetryMeterValueRecorder {
+	return &openTelemetryMeterValueRecorder{
 		ctx:     ctx,
 		wrapped: valueRecorder,
 	}
 }
 
-func (nm *OpenTelemetryMeterValueRecorder) RecordValue(val uint64) {
+func (nm *openTelemetryMeterValueRecorder) RecordValue(val uint64) {
 	if val > 0 {
 		nm.wrapped.Record(nm.ctx, int64(val))
 	}
