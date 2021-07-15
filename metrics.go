@@ -37,9 +37,11 @@ func (meter *OpenTelemetryMeter) Counter(name string, tags map[string]string) (g
 			meter.lock.Unlock()
 			return nil, err
 		}
+		var labels []attribute.KeyValue
 		for k, v := range tags {
-			otCounter.Bind(attribute.String(k, v))
+			labels = append(labels, attribute.String(k, v))
 		}
+		otCounter.Bind(labels...)
 		counter = newOpenTelemetryCounter(context.Background(), otCounter)
 		meter.counterCache[key] = counter
 	}
