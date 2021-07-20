@@ -15,7 +15,6 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/sdk/trace"
-	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
@@ -54,9 +53,9 @@ func TestOpenTelemetryTracer(t *testing.T) {
 	ctx := context.Background()
 	exporter := tracetest.NewInMemoryExporter()
 	defer exporter.Shutdown(ctx)
-	bsp := sdktrace.NewSimpleSpanProcessor(exporter)
+	bsp := trace.NewSimpleSpanProcessor(exporter)
 	defer bsp.Shutdown(ctx)
-	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(bsp))
+	tp := trace.NewTracerProvider(trace.WithSpanProcessor(bsp))
 	defer tp.Shutdown(ctx)
 	otel.SetTracerProvider(tp)
 

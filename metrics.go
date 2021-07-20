@@ -3,10 +3,11 @@ package gocbopentelemetry
 import (
 	"context"
 	"fmt"
+	"sync"
+
 	"github.com/couchbase/gocb/v2"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
-	"sync"
 )
 
 type OpenTelemetryMeter struct {

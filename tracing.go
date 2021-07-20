@@ -2,10 +2,11 @@ package gocbopentelemetry
 
 import (
 	"context"
+	"time"
+
 	"github.com/couchbase/gocb/v2"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
-	"time"
 )
 
 type OpenTelemetryRequestTracer struct {

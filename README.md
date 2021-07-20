@@ -7,7 +7,7 @@ This repository provides wrappers for tracing and metrics and will remain v0.x u
 ## Installing
 
 ```bash
-go get github.com/couchbase/gocb-opentelemetry
+go get github.com/nicksherron/gocb-opentelemetry
 ```
 
 ## Tracing
