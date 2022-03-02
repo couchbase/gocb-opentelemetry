@@ -37,12 +37,13 @@ func (meter *OpenTelemetryMeter) Counter(name string, tags map[string]string) (g
 			meter.lock.Unlock()
 			return nil, err
 		}
-		var labels []attribute.KeyValue
+		labels := []attribute.KeyValue{
+			{Key: "system", Value: attribute.StringValue("couchbase")},
+		}
 		for k, v := range tags {
 			labels = append(labels, attribute.String(k, v))
 		}
-		otCounter.Bind(labels...)
-		counter = newOpenTelemetryCounter(context.Background(), otCounter)
+		counter = newOpenTelemetryCounter(context.Background(), otCounter, labels)
 		meter.counterCache[key] = counter
 	}
 	meter.lock.Unlock()
@@ -56,7 +57,7 @@ func (meter *OpenTelemetryMeter) ValueRecorder(name string, tags map[string]stri
 	meter.lock.Lock()
 	recorder := meter.recorderCache[key]
 	if recorder == nil {
-		otRecorder, err := meter.wrapped.NewInt64ValueRecorder(name)
+		otRecorder, err := meter.wrapped.NewInt64Histogram(name)
 		if err != nil {
 			meter.lock.Unlock()
 			return nil, err
@@ -65,8 +66,7 @@ func (meter *OpenTelemetryMeter) ValueRecorder(name string, tags map[string]stri
 		for k, v := range tags {
 			labels = append(labels, attribute.String(k, v))
 		}
-		otRecorder.Bind(labels...)
-		recorder = newOpenTelemetryValueRecorder(context.Background(), otRecorder)
+		recorder = newOpenTelemetryValueRecorder(context.Background(), otRecorder, labels)
 		meter.recorderCache[key] = recorder
 	}
 	meter.lock.Unlock()
@@ -75,35 +75,39 @@ func (meter *OpenTelemetryMeter) ValueRecorder(name string, tags map[string]stri
 }
 
 type openTelemetryCounter struct {
-	ctx     context.Context
-	wrapped metric.Int64Counter
+	ctx        context.Context
+	wrapped    metric.Int64Counter
+	attributes []attribute.KeyValue
 }
 
-func newOpenTelemetryCounter(ctx context.Context, counter metric.Int64Counter) *openTelemetryCounter {
+func newOpenTelemetryCounter(ctx context.Context, counter metric.Int64Counter, attributes []attribute.KeyValue) *openTelemetryCounter {
 	return &openTelemetryCounter{
-		ctx:     ctx,
-		wrapped: counter,
+		ctx:        ctx,
+		wrapped:    counter,
+		attributes: attributes,
 	}
 }
 
 func (nm *openTelemetryCounter) IncrementBy(num uint64) {
-	nm.wrapped.Add(nm.ctx, int64(num), attribute.KeyValue{Key: "system", Value: attribute.StringValue("couchbase")})
+	nm.wrapped.Add(nm.ctx, int64(num), nm.attributes...)
 }
 
 type openTelemetryMeterValueRecorder struct {
-	ctx     context.Context
-	wrapped metric.Int64ValueRecorder
+	ctx        context.Context
+	wrapped    metric.Int64Histogram
+	attributes []attribute.KeyValue
 }
 
-func newOpenTelemetryValueRecorder(ctx context.Context, valueRecorder metric.Int64ValueRecorder) *openTelemetryMeterValueRecorder {
+func newOpenTelemetryValueRecorder(ctx context.Context, valueRecorder metric.Int64Histogram, attributes []attribute.KeyValue) *openTelemetryMeterValueRecorder {
 	return &openTelemetryMeterValueRecorder{
-		ctx:     ctx,
-		wrapped: valueRecorder,
+		ctx:        ctx,
+		wrapped:    valueRecorder,
+		attributes: attributes,
 	}
 }
 
 func (nm *openTelemetryMeterValueRecorder) RecordValue(val uint64) {
 	if val > 0 {
-		nm.wrapped.Record(nm.ctx, int64(val))
+		nm.wrapped.Record(nm.ctx, int64(val), nm.attributes...)
 	}
 }
