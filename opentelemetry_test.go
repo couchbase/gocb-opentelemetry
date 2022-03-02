@@ -9,9 +9,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/sdk/export/trace"
-	"go.opentelemetry.io/otel/sdk/export/trace/tracetest"
+	"go.opentelemetry.io/otel/metric/metrictest"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"os"
 	"sort"
 	"testing"
@@ -82,7 +82,7 @@ func TestOpenTelemetryTracer(t *testing.T) {
 	require.Nil(t, err)
 
 	// Force flush the processor and then reset the exporter so that we only get spans that we want.
-	bsp.ForceFlush()
+	assert.NoError(t, bsp.ForceFlush(ctx))
 	exporter.Reset()
 
 	ctx, span := tracer.Start(ctx, "myparentoperation")
@@ -92,7 +92,7 @@ func TestOpenTelemetryTracer(t *testing.T) {
 	require.Nil(t, err)
 	span.End()
 
-	bsp.ForceFlush()
+	assert.NoError(t, bsp.ForceFlush(ctx))
 	spans := exporter.GetSpans()
 	if len(spans) != 5 {
 		t.Fatalf("Expected 5 spans but got %d", len(spans))
@@ -140,10 +140,6 @@ func TestOpenTelemetryTracer(t *testing.T) {
 			Key:   "db.system",
 			Value: attribute.StringValue("couchbase"),
 		},
-		{
-			Key:   "db.couchbase.retries",
-			Value: attribute.IntValue(0),
-		},
 	})
 	assertOTSpan(t, spans[4], "dispatch_to_server", []attribute.KeyValue{
 		{
@@ -185,27 +181,83 @@ func TestOpenTelemetryTracer(t *testing.T) {
 	})
 }
 
-func assertOTSpan(t *testing.T, span *trace.SpanSnapshot, name string, attribs []attribute.KeyValue) {
+func TestOpenTelemetryMeter(t *testing.T) {
+	gocb.SetLogger(gocb.VerboseStdioLogger())
+	provider := metrictest.NewMeterProvider()
+
+	cluster, err := gocb.Connect(server, gocb.ClusterOptions{
+		Authenticator: gocb.PasswordAuthenticator{
+			Username: user,
+			Password: password,
+		},
+		Meter: NewOpenTelemetryMeter(provider),
+	})
+	require.Nil(t, err)
+	defer cluster.Close(nil)
+
+	b := cluster.Bucket(bucket)
+	err = b.WaitUntilReady(5*time.Second, nil)
+	require.Nil(t, err, err)
+
+	col := b.DefaultCollection()
+
+	_, err = col.Upsert("someid", "someval", nil)
+	require.Nil(t, err)
+
+	_, err = col.Get("someid", nil)
+	require.Nil(t, err)
+
+	batches := provider.MeasurementBatches
+
+	require.Len(t, batches, 2)
+
+	assertOTMetric(t, batches[0], "upsert")
+	assertOTMetric(t, batches[1], "get")
+}
+
+func assertOTSpan(t *testing.T, span tracetest.SpanStub, name string, attribs []attribute.KeyValue) {
 	assert.NotZero(t, span.StartTime)
 	assert.NotZero(t, span.EndTime)
 	assert.Equal(t, name, span.Name)
 
-	if assert.Len(t, span.Attributes, len(attribs)) {
-		for _, attrib := range attribs {
-			found := false
-			for _, a := range span.Attributes {
-				if attrib.Key == a.Key {
-					// otel doesn't have a nil value type so we have to use empty string.
-					if attrib.Value.AsString() == "" {
-						assert.NotEmpty(t, a.Value)
-					} else {
-						assert.Equal(t, attrib.Value, a.Value)
-					}
-					found = true
-					break
+	require.Len(t, span.Attributes, len(attribs))
+	for _, attrib := range attribs {
+		var found bool
+		for _, a := range span.Attributes {
+			if attrib.Key == a.Key {
+				// otel doesn't have a nil value type so we have to use empty string.
+				if attrib.Value.AsString() == "" {
+					assert.NotEmpty(t, a.Value)
+				} else {
+					assert.Equal(t, attrib.Value, a.Value)
 				}
+				found = true
+				break
 			}
-			assert.True(t, found, fmt.Sprintf("key not found: %s", attrib.Key))
 		}
+		assert.True(t, found, fmt.Sprintf("key not found: %s", attrib.Key))
+	}
+}
+
+func assertOTMetric(t *testing.T, metric metrictest.Batch, name string) {
+	require.Len(t, metric.Measurements, 1)
+	assert.NotZero(t, metric.Measurements[0].Number)
+	assert.Equal(t, "db.couchbase.operations", metric.Measurements[0].Instrument.Descriptor().Name())
+
+	require.Len(t, metric.Labels, 2)
+	expectedKeys := map[attribute.Key]string{
+		attribute.Key("db.couchbase.service"): "kv",
+		attribute.Key("db.operation"):         name,
+	}
+	for key, val := range expectedKeys {
+		var found bool
+		for _, l := range metric.Labels {
+			if key == l.Key {
+				found = true
+				assert.Equal(t, val, l.Value.AsString())
+				break
+			}
+		}
+		assert.True(t, found, fmt.Sprintf("key not found: %s", key))
 	}
 }
