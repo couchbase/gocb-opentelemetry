@@ -6,6 +6,7 @@ import (
 	"github.com/couchbase/gocb/v2"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/metric/instrument/syncint64"
 	"sync"
 )
 
@@ -32,11 +33,7 @@ func (meter *OpenTelemetryMeter) Counter(name string, tags map[string]string) (g
 	meter.lock.Lock()
 	counter := meter.counterCache[key]
 	if counter == nil {
-		otCounter, err := meter.wrapped.NewInt64Counter(name)
-		if err != nil {
-			meter.lock.Unlock()
-			return nil, err
-		}
+		otCounter, _ := meter.wrapped.SyncInt64().Counter(name)
 		labels := []attribute.KeyValue{
 			{Key: "system", Value: attribute.StringValue("couchbase")},
 		}
@@ -57,7 +54,7 @@ func (meter *OpenTelemetryMeter) ValueRecorder(name string, tags map[string]stri
 	meter.lock.Lock()
 	recorder := meter.recorderCache[key]
 	if recorder == nil {
-		otRecorder, err := meter.wrapped.NewInt64Histogram(name)
+		otRecorder, err := meter.wrapped.SyncInt64().Histogram(name)
 		if err != nil {
 			meter.lock.Unlock()
 			return nil, err
@@ -76,11 +73,11 @@ func (meter *OpenTelemetryMeter) ValueRecorder(name string, tags map[string]stri
 
 type openTelemetryCounter struct {
 	ctx        context.Context
-	wrapped    metric.Int64Counter
+	wrapped    syncint64.Counter
 	attributes []attribute.KeyValue
 }
 
-func newOpenTelemetryCounter(ctx context.Context, counter metric.Int64Counter, attributes []attribute.KeyValue) *openTelemetryCounter {
+func newOpenTelemetryCounter(ctx context.Context, counter syncint64.Counter, attributes []attribute.KeyValue) *openTelemetryCounter {
 	return &openTelemetryCounter{
 		ctx:        ctx,
 		wrapped:    counter,
@@ -94,11 +91,11 @@ func (nm *openTelemetryCounter) IncrementBy(num uint64) {
 
 type openTelemetryMeterValueRecorder struct {
 	ctx        context.Context
-	wrapped    metric.Int64Histogram
+	wrapped    syncint64.Histogram
 	attributes []attribute.KeyValue
 }
 
-func newOpenTelemetryValueRecorder(ctx context.Context, valueRecorder metric.Int64Histogram, attributes []attribute.KeyValue) *openTelemetryMeterValueRecorder {
+func newOpenTelemetryValueRecorder(ctx context.Context, valueRecorder syncint64.Histogram, attributes []attribute.KeyValue) *openTelemetryMeterValueRecorder {
 	return &openTelemetryMeterValueRecorder{
 		ctx:        ctx,
 		wrapped:    valueRecorder,
