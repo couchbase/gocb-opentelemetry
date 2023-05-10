@@ -33,7 +33,11 @@ func (meter *OpenTelemetryMeter) Counter(name string, tags map[string]string) (g
 	meter.lock.Lock()
 	counter := meter.counterCache[key]
 	if counter == nil {
-		otCounter, _ := meter.wrapped.SyncInt64().Counter(name)
+		otCounter, err := meter.wrapped.SyncInt64().Counter(name)
+		if err != nil {
+			meter.lock.Unlock()
+			return nil, err
+		}
 		labels := []attribute.KeyValue{
 			{Key: "system", Value: attribute.StringValue("couchbase")},
 		}
