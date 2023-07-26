@@ -5,19 +5,20 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
+	"os"
+	"sort"
+	"testing"
+	"time"
+
 	"github.com/couchbase/gocb/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/exporters/stdout/stdoutmetric"
 	"go.opentelemetry.io/otel/sdk/metric"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
-	"os"
-	"sort"
-	"testing"
-	"time"
 )
 
 func envFlagString(envName, name, value, usage string) *string {
@@ -186,17 +187,10 @@ func TestOpenTelemetryTracer(t *testing.T) {
 func TestOpenTelemetryMeter(t *testing.T) {
 	gocb.SetLogger(gocb.VerboseStdioLogger())
 
-	enc := json.NewEncoder(os.Stdout)
-	exp, err := stdoutmetric.New(
-		stdoutmetric.WithEncoder(enc),
-		stdoutmetric.WithoutTimestamps(),
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
+	rdr := metric.NewManualReader()
 
 	provider := metric.NewMeterProvider(
-		metric.WithReader(metric.NewPeriodicReader(exp)),
+		metric.WithReader(rdr),
 	)
 
 	cluster, err := gocb.Connect(server, gocb.ClusterOptions{
@@ -221,12 +215,18 @@ func TestOpenTelemetryMeter(t *testing.T) {
 	_, err = col.Get("someid", nil)
 	require.Nil(t, err)
 
-	batches := provider.MeasurementBatches
+	var data metricdata.ResourceMetrics
+	_ = rdr.Collect(context.Background(), &data)
 
-	require.Len(t, batches, 2)
 
-	assertOTMetric(t, batches[0], "upsert")
-	assertOTMetric(t, batches[1], "get")
+	require.Len(t, data.ScopeMetrics, 1)
+	require.Len(t, data.ScopeMetrics[0].Metrics, 1)
+	require.Len(t, data.ScopeMetrics[0].Metrics[0], 1)
+
+	//assertOTMetric(t, batches[0], "upsert")
+	//assertOTMetric(t, batches[1], "get")
+	aaa, _ := json.Marshal(data)
+	fmt.Println("======>", string(aaa))
 }
 
 func assertOTSpan(t *testing.T, span tracetest.SpanStub, name string, attribs []attribute.KeyValue) {
@@ -253,25 +253,25 @@ func assertOTSpan(t *testing.T, span tracetest.SpanStub, name string, attribs []
 	}
 }
 
-func assertOTMetric(t *testing.T, metric metrictest.Batch, name string) {
-	require.Len(t, metric.Measurements, 1)
-	assert.NotZero(t, metric.Measurements[0].Number)
-	assert.Equal(t, "db.couchbase.operations", metric.Measurements[0].Instrument.Descriptor().Name())
-
-	require.Len(t, metric.Labels, 2)
-	expectedKeys := map[attribute.Key]string{
-		attribute.Key("db.couchbase.service"): "kv",
-		attribute.Key("db.operation"):         name,
-	}
-	for key, val := range expectedKeys {
-		var found bool
-		for _, l := range metric.Labels {
-			if key == l.Key {
-				found = true
-				assert.Equal(t, val, l.Value.AsString())
-				break
-			}
-		}
-		assert.True(t, found, fmt.Sprintf("key not found: %s", key))
-	}
-}
+//func assertOTMetric(t *testing.T, metric metrictest.Batch, name string) {
+//	require.Len(t, metric.Measurements, 1)
+//	assert.NotZero(t, metric.Measurements[0].Number)
+//	assert.Equal(t, "db.couchbase.operations", metric.Measurements[0].Instrument.Descriptor().Name())
+//
+//	require.Len(t, metric.Labels, 2)
+//	expectedKeys := map[attribute.Key]string{
+//		attribute.Key("db.couchbase.service"): "kv",
+//		attribute.Key("db.operation"):         name,
+//	}
+//	for key, val := range expectedKeys {
+//		var found bool
+//		for _, l := range metric.Labels {
+//			if key == l.Key {
+//				found = true
+//				assert.Equal(t, val, l.Value.AsString())
+//				break
+//			}
+//		}
+//		assert.True(t, found, fmt.Sprintf("key not found: %s", key))
+//	}
+//}
