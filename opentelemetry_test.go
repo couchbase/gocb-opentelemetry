@@ -2,6 +2,7 @@ package gocbopentelemetry
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"github.com/couchbase/gocb/v2"
@@ -9,7 +10,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/metric/metrictest"
+	"go.opentelemetry.io/otel/exporters/stdout/stdoutmetric"
+	"go.opentelemetry.io/otel/sdk/metric"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"os"
@@ -183,7 +185,19 @@ func TestOpenTelemetryTracer(t *testing.T) {
 
 func TestOpenTelemetryMeter(t *testing.T) {
 	gocb.SetLogger(gocb.VerboseStdioLogger())
-	provider := metrictest.NewMeterProvider()
+
+	enc := json.NewEncoder(os.Stdout)
+	exp, err := stdoutmetric.New(
+		stdoutmetric.WithEncoder(enc),
+		stdoutmetric.WithoutTimestamps(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	provider := metric.NewMeterProvider(
+		metric.WithReader(metric.NewPeriodicReader(exp)),
+	)
 
 	cluster, err := gocb.Connect(server, gocb.ClusterOptions{
 		Authenticator: gocb.PasswordAuthenticator{
