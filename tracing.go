@@ -3,11 +3,12 @@ package gocbopentelemetry
 import (
 	"context"
 	"fmt"
+	"log"
+	"time"
+
 	"github.com/couchbase/gocb/v2"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
-	"log"
-	"time"
 )
 
 // OpenTelemetryRequestTracer is an implementation of the gocb Tracer interface which wraps an OpenTelemetry tracer.
