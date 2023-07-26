@@ -3,10 +3,11 @@ package gocbopentelemetry
 import (
 	"context"
 	"fmt"
+	"sync"
+
 	"github.com/couchbase/gocb/v2"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
-	"sync"
 )
 
 // OpenTelemetryMeter is an implementation of the gocb Meter interface which wraps an OpenTelemetry meter.
@@ -32,7 +33,7 @@ func (meter *OpenTelemetryMeter) Counter(name string, tags map[string]string) (g
 	meter.lock.Lock()
 	counter := meter.counterCache[key]
 	if counter == nil {
-		otCounter, err := meter.wrapped.NewInt64Counter(name)
+		otCounter, err := meter.wrapped.Int64Counter(name)
 		if err != nil {
 			meter.lock.Unlock()
 			return nil, err
@@ -57,7 +58,7 @@ func (meter *OpenTelemetryMeter) ValueRecorder(name string, tags map[string]stri
 	meter.lock.Lock()
 	recorder := meter.recorderCache[key]
 	if recorder == nil {
-		otRecorder, err := meter.wrapped.NewInt64Histogram(name)
+		otRecorder, err := meter.wrapped.Int64Histogram(name)
 		if err != nil {
 			meter.lock.Unlock()
 			return nil, err
@@ -89,7 +90,7 @@ func newOpenTelemetryCounter(ctx context.Context, counter metric.Int64Counter, a
 }
 
 func (nm *openTelemetryCounter) IncrementBy(num uint64) {
-	nm.wrapped.Add(nm.ctx, int64(num), nm.attributes...)
+	nm.wrapped.Add(nm.ctx, int64(num), metric.WithAttributes(nm.attributes...))
 }
 
 type openTelemetryMeterValueRecorder struct {
@@ -108,6 +109,6 @@ func newOpenTelemetryValueRecorder(ctx context.Context, valueRecorder metric.Int
 
 func (nm *openTelemetryMeterValueRecorder) RecordValue(val uint64) {
 	if val > 0 {
-		nm.wrapped.Record(nm.ctx, int64(val), nm.attributes...)
+		nm.wrapped.Record(nm.ctx, int64(val), metric.WithAttributes(nm.attributes...))
 	}
 }
