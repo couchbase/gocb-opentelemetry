@@ -76,6 +76,10 @@ func (span *OpenTelemetryRequestSpan) SetAttribute(key string, value interface{}
 		span.wrapped.SetAttributes(attribute.Int64(key, v))
 	case *int64:
 		span.wrapped.SetAttributes(attribute.Int64(key, *v))
+	case uint32:
+		span.wrapped.SetAttributes(attribute.Int(key, int(v)))
+	case *uint32:
+		span.wrapped.SetAttributes(attribute.Int(key, int(*v)))
 	case float64:
 		span.wrapped.SetAttributes(attribute.Float64(key, v))
 	case *float64:
