@@ -2,10 +2,8 @@ package gocbopentelemetry
 
 import (
 	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
-	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	"os"
 	"sort"
 	"testing"
@@ -17,6 +15,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
@@ -143,6 +142,10 @@ func TestOpenTelemetryTracer(t *testing.T) {
 			Key:   "db.system",
 			Value: attribute.StringValue("couchbase"),
 		},
+		{
+			Key:   "db.couchbase.retries",
+			Value: attribute.StringValue(""),
+		},
 	})
 	assertOTSpan(t, spans[4], "dispatch_to_server", []attribute.KeyValue{
 		{
@@ -218,15 +221,14 @@ func TestOpenTelemetryMeter(t *testing.T) {
 	var data metricdata.ResourceMetrics
 	_ = rdr.Collect(context.Background(), &data)
 
-
 	require.Len(t, data.ScopeMetrics, 1)
 	require.Len(t, data.ScopeMetrics[0].Metrics, 1)
-	require.Len(t, data.ScopeMetrics[0].Metrics[0], 1)
 
-	//assertOTMetric(t, batches[0], "upsert")
-	//assertOTMetric(t, batches[1], "get")
-	aaa, _ := json.Marshal(data)
-	fmt.Println("======>", string(aaa))
+	histogram, ok := data.ScopeMetrics[0].Metrics[0].Data.(metricdata.Histogram[int64])
+	require.True(t, ok)
+
+	assertOTMetric(t, histogram.DataPoints[0], "upsert")
+	assertOTMetric(t, histogram.DataPoints[1], "get")
 }
 
 func assertOTSpan(t *testing.T, span tracetest.SpanStub, name string, attribs []attribute.KeyValue) {
@@ -253,25 +255,18 @@ func assertOTSpan(t *testing.T, span tracetest.SpanStub, name string, attribs []
 	}
 }
 
-//func assertOTMetric(t *testing.T, metric metrictest.Batch, name string) {
-//	require.Len(t, metric.Measurements, 1)
-//	assert.NotZero(t, metric.Measurements[0].Number)
-//	assert.Equal(t, "db.couchbase.operations", metric.Measurements[0].Instrument.Descriptor().Name())
-//
-//	require.Len(t, metric.Labels, 2)
-//	expectedKeys := map[attribute.Key]string{
-//		attribute.Key("db.couchbase.service"): "kv",
-//		attribute.Key("db.operation"):         name,
-//	}
-//	for key, val := range expectedKeys {
-//		var found bool
-//		for _, l := range metric.Labels {
-//			if key == l.Key {
-//				found = true
-//				assert.Equal(t, val, l.Value.AsString())
-//				break
-//			}
-//		}
-//		assert.True(t, found, fmt.Sprintf("key not found: %s", key))
-//	}
-//}
+func assertOTMetric(t *testing.T, metric metricdata.HistogramDataPoint[int64], name string) {
+	require.EqualValues(t, metric.Attributes.Len(), 2)
+	expectedKeys := []attribute.KeyValue{
+		attribute.String("db.couchbase.service", "kv"),
+		attribute.String("db.operation", name),
+	}
+
+	for _, val := range expectedKeys {
+		v, found := metric.Attributes.Value(val.Key)
+		assert.True(t, found)
+		assert.Equal(t, val.Value, v)
+	}
+
+	require.EqualValues(t, metric.Count, 1)
+}
