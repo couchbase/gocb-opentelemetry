@@ -53,6 +53,7 @@ func TestMain(m *testing.M) {
 func TestOpenTelemetryTracer(t *testing.T) {
 	gocb.SetLogger(gocb.VerboseStdioLogger())
 	ctx := context.Background()
+
 	exporter := tracetest.NewInMemoryExporter()
 	defer exporter.Shutdown(ctx)
 	bsp := sdktrace.NewSimpleSpanProcessor(exporter)
