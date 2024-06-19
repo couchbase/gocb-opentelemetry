@@ -1,15 +1,18 @@
 package gocbopentelemetry
 
 import (
+	"bytes"
 	"context"
-	"flag"
 	"fmt"
 	"os"
 	"sort"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/couchbase/gocb/v2"
+	"github.com/ory/dockertest/v3"
+	"github.com/ory/dockertest/v3/docker"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel"
@@ -20,37 +23,176 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
-func envFlagString(envName, name, value, usage string) *string {
-	envValue := os.Getenv(envName)
-	if envValue != "" {
-		value = envValue
-	}
-	return flag.String(name, value, usage)
-}
-
-var server, user, password, bucket string
+var ( // nolint: gochecknoglobals
+	user               = "couchbase"
+	password           = "couchbase"
+	integrationCleanup func() error
+	integrationOnce    sync.Once
+	bucketMetrics      = ""
+	bucketTracer       = ""
+	server             = ""
+)
 
 func TestMain(m *testing.M) {
-	serverFlag := envFlagString("GOCBSERVER", "server", "localhost",
-		"The connection string to connect to for a real server")
-	userFlag := envFlagString("GOCBUSER", "user", "Administrator",
-		"The username to use to authenticate when using a real server")
-	passwordFlag := envFlagString("GOCBPASS", "pass", "password",
-		"The password to use to authenticate when using a real server")
-	bucketFlag := envFlagString("GOCBBUCKET", "bucket", "default",
-		"The bucket to use to test against")
-	flag.Parse()
+	code := m.Run()
+	if integrationCleanup != nil {
+		if err := integrationCleanup(); err != nil {
+			panic(err)
+		}
+	}
 
-	server = *serverFlag
-	user = *userFlag
-	password = *passwordFlag
-	bucket = *bucketFlag
-
-	result := m.Run()
-	os.Exit(result)
+	os.Exit(code)
 }
 
-func TestOpenTelemetryTracer(t *testing.T) {
+func requireCouchbase(tb testing.TB) {
+	integrationOnce.Do(func() {
+		pool, resource, err := setupCouchbase(tb)
+		require.NoError(tb, err)
+
+		port := resource.GetPort("11210/tcp")
+		integrationCleanup = func() error {
+			return pool.Purge(resource)
+		}
+
+		server = fmt.Sprintf("couchbase://localhost:%v", port)
+		bucketMetrics = fmt.Sprintf("testing-couchbase-metrics-%d", time.Now().Unix())
+		require.NoError(tb, createBucket(context.Background(), tb, bucketMetrics))
+		tb.Cleanup(func() {
+			require.NoError(tb, removeBucket(context.Background(), tb, bucketMetrics))
+		})
+
+		bucketTracer = fmt.Sprintf("testing-couchbase-tracer-%d", time.Now().Unix())
+		require.NoError(tb, createBucket(context.Background(), tb, bucketTracer))
+		tb.Cleanup(func() {
+			require.NoError(tb, removeBucket(context.Background(), tb, bucketTracer))
+		})
+	})
+
+}
+
+func setupCouchbase(tb testing.TB) (*dockertest.Pool, *dockertest.Resource, error) {
+	tb.Log("setup couchbase cluster")
+
+	pool, err := dockertest.NewPool("")
+	if err != nil {
+		return nil, nil, err
+	}
+
+	pwd, err := os.Getwd()
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get working directory: %w", err)
+	}
+
+	resource, err := pool.RunWithOptions(&dockertest.RunOptions{
+		Repository: "couchbase",
+		Tag:        "latest",
+		Cmd:        []string{"/opt/couchbase/configure-server.sh"},
+		Env: []string{
+			"CLUSTER_NAME=couchbase",
+			fmt.Sprintf("COUCHBASE_ADMINISTRATOR_USERNAME=%s", user),
+			fmt.Sprintf("COUCHBASE_ADMINISTRATOR_PASSWORD=%s", password),
+		},
+		Mounts: []string{
+			fmt.Sprintf("%s/configure-server.sh:/opt/couchbase/configure-server.sh", pwd),
+		},
+		PortBindings: map[docker.Port][]docker.PortBinding{
+			"8091/tcp": {
+				{
+					HostIP: "0.0.0.0", HostPort: "8091",
+				},
+			},
+			"11210/tcp": {
+				{
+					HostIP: "0.0.0.0", HostPort: "11210",
+				},
+			},
+		},
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Look for readyness
+	var stderr bytes.Buffer
+	time.Sleep(15 * time.Second)
+	for range 5 {
+		time.Sleep(time.Second)
+		exitCode, err := resource.Exec([]string{"/usr/bin/cat", "/is-ready"}, dockertest.ExecOptions{
+			StdErr: &stderr, // without stderr exit code is not reported
+		})
+		if exitCode == 0 && err == nil {
+			break
+		}
+		tb.Log(err)
+	}
+
+	tb.Log("couchbase cluster ready")
+
+	return pool, resource, nil
+}
+
+func createBucket(_ context.Context, _ testing.TB, bucket string) error {
+	cluster, err := gocb.Connect(server, gocb.ClusterOptions{
+		Authenticator: gocb.PasswordAuthenticator{
+			Username: user,
+			Password: password,
+		},
+	})
+	if err != nil {
+		return err
+	}
+
+	err = cluster.WaitUntilReady(time.Second*10, nil)
+	if err != nil {
+		return err
+	}
+
+	err = cluster.Buckets().CreateBucket(gocb.CreateBucketSettings{
+		BucketSettings: gocb.BucketSettings{
+			Name:       bucket,
+			RAMQuotaMB: 100, // smallest value and allow max 10 running bucket with cluster-ramsize 1024 from setup script
+			BucketType: gocb.CouchbaseBucketType,
+		},
+	}, nil)
+	if err != nil {
+		return err
+	}
+
+	for range 5 { // try five time
+		time.Sleep(time.Second)
+		err = cluster.Bucket(bucket).WaitUntilReady(time.Second*10, nil)
+		if err == nil {
+			break
+		}
+	}
+
+	return err
+}
+
+func removeBucket(ctx context.Context, _ testing.TB, bucket string) error {
+	cluster, err := gocb.Connect(server, gocb.ClusterOptions{
+		Authenticator: gocb.PasswordAuthenticator{
+			Username: user,
+			Password: password,
+		},
+	})
+	if err != nil {
+		return err
+	}
+
+	return cluster.Buckets().DropBucket(bucket, &gocb.DropBucketOptions{
+		Context: ctx,
+	})
+}
+
+func TestOpenTelemetry(t *testing.T) {
+	requireCouchbase(t)
+
+	t.Run("tracer", testOpenTelemetryTracer)
+	t.Run("meter", testOpenTelemetryMeter)
+}
+
+func testOpenTelemetryTracer(t *testing.T) {
 	gocb.SetLogger(gocb.VerboseStdioLogger())
 	ctx := context.Background()
 	exporter := tracetest.NewInMemoryExporter()
@@ -73,7 +215,7 @@ func TestOpenTelemetryTracer(t *testing.T) {
 	require.Nil(t, err)
 	defer cluster.Close(nil)
 
-	b := cluster.Bucket(bucket)
+	b := cluster.Bucket(bucketTracer)
 	err = b.WaitUntilReady(5*time.Second, nil)
 	require.Nil(t, err, err)
 
@@ -187,7 +329,7 @@ func TestOpenTelemetryTracer(t *testing.T) {
 	})
 }
 
-func TestOpenTelemetryMeter(t *testing.T) {
+func testOpenTelemetryMeter(t *testing.T) {
 	gocb.SetLogger(gocb.VerboseStdioLogger())
 
 	rdr := metric.NewManualReader()
@@ -206,7 +348,7 @@ func TestOpenTelemetryMeter(t *testing.T) {
 	require.Nil(t, err)
 	defer cluster.Close(nil)
 
-	b := cluster.Bucket(bucket)
+	b := cluster.Bucket(bucketMetrics)
 	err = b.WaitUntilReady(5*time.Second, nil)
 	require.Nil(t, err, err)
 
@@ -227,8 +369,9 @@ func TestOpenTelemetryMeter(t *testing.T) {
 	histogram, ok := data.ScopeMetrics[0].Metrics[0].Data.(metricdata.Histogram[int64])
 	require.True(t, ok)
 
-	assertOTMetric(t, histogram.DataPoints[0], "upsert")
 	assertOTMetric(t, histogram.DataPoints[1], "get")
+	assertOTMetric(t, histogram.DataPoints[0], "upsert")
+
 }
 
 func assertOTSpan(t *testing.T, span tracetest.SpanStub, name string, attribs []attribute.KeyValue) {
