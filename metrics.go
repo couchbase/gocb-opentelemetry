@@ -16,6 +16,7 @@ type OpenTelemetryMeter struct {
 	counterCache  map[string]*openTelemetryCounter
 	recorderCache map[string]*openTelemetryMeterValueRecorder
 	lock          sync.Mutex
+	provider      metric.MeterProvider
 }
 
 // NewOpenTelemetryMeter creates a new OpenTelemetryMeter.
@@ -24,7 +25,16 @@ func NewOpenTelemetryMeter(provider metric.MeterProvider) *OpenTelemetryMeter {
 		wrapped:       provider.Meter("com.couchbase.client/go"),
 		counterCache:  make(map[string]*openTelemetryCounter),
 		recorderCache: make(map[string]*openTelemetryMeterValueRecorder),
+		provider:      provider,
 	}
+}
+
+func (meter *OpenTelemetryMeter) Wrapped() metric.Meter {
+	return meter.wrapped
+}
+
+func (meter *OpenTelemetryMeter) Provider() metric.MeterProvider {
+	return meter.provider
 }
 
 // Counter provides a wrapped OpenTelemetry Counter.

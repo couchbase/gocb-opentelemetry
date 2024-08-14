@@ -13,14 +13,24 @@ import (
 
 // OpenTelemetryRequestTracer is an implementation of the gocb Tracer interface which wraps an OpenTelemetry tracer.
 type OpenTelemetryRequestTracer struct {
-	wrapped trace.Tracer
+	wrapped  trace.Tracer
+	provider trace.TracerProvider
 }
 
 // NewOpenTelemetryRequestTracer creates a new OpenTelemetryRequestTracer.
 func NewOpenTelemetryRequestTracer(provider trace.TracerProvider) *OpenTelemetryRequestTracer {
 	return &OpenTelemetryRequestTracer{
-		wrapped: provider.Tracer("com.couchbase.client/go"),
+		wrapped:  provider.Tracer("com.couchbase.client/go"),
+		provider: provider,
 	}
+}
+
+func (tracer *OpenTelemetryRequestTracer) Wrapped() trace.Tracer {
+	return tracer.wrapped
+}
+
+func (tracer *OpenTelemetryRequestTracer) Provider() trace.TracerProvider {
+	return tracer.provider
 }
 
 // RequestSpan provides a wrapped OpenTelemetry Span.
@@ -50,6 +60,10 @@ func NewOpenTelemetryRequestSpan(ctx context.Context, span trace.Span) *OpenTele
 // End completes the span.
 func (span *OpenTelemetryRequestSpan) End() {
 	span.wrapped.End()
+}
+
+func (span *OpenTelemetryRequestSpan) Wrapped() trace.Span {
+	return span.wrapped
 }
 
 // Context returns the RequestSpanContext for this span.
