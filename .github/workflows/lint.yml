@@ -1,0 +1,35 @@
+name: Run Linter
+on:
+  push:
+    tags:
+      - v*
+    branches:
+      - master
+  pull_request:
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - run: |
+          go install golang.org/x/tools/cmd/goimports@latest
+      - name: goimports
+        run: |
+          goimports -w .
+          find . -name go.mod -execdir go mod tidy \;
+          if [ -n "$(git status --porcelain)" ]; then
+            echo 'To fix this check, run "goimports -w . && find . -name go.mod -execdir go mod tidy \;"'
+            git status # Show the files that failed to pass the check.
+            exit 1
+          fi
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v2
+        with:
+          version: v1.55
+          args: --timeout=3m
+          skip-pkg-cache: true
+          skip-build-cache: true
