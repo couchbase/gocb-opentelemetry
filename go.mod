@@ -1,7 +1,7 @@
 module github.com/couchbase/gocb-opentelemetry
 
 require (
-	github.com/couchbase/gocb/v2 v2.9.2-0.20240814074849-fcf55fc858b3
+	github.com/couchbase/gocb/v2 v2.9.2
 	github.com/stretchr/testify v1.9.0
 	go.opentelemetry.io/otel v1.24.0
 	go.opentelemetry.io/otel/metric v1.24.0
@@ -11,7 +11,7 @@ require (
 )
 
 require (
-	github.com/couchbase/gocbcore/v10 v10.5.2-0.20240730072846-40aebed77ad1 // indirect
+	github.com/couchbase/gocbcore/v10 v10.5.2 // indirect
 	github.com/couchbase/gocbcoreps v0.1.3 // indirect
 	github.com/couchbase/goprotostellar v1.0.2 // indirect
 	github.com/couchbaselabs/gocbconnstr/v2 v2.0.0-20240607131231-fb385523de28 // indirect
