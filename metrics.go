@@ -107,7 +107,7 @@ func (nm *openTelemetryCounter) IncrementBy(num uint64) {
 		log.Printf("IncrementBy: value %d exceeds int64 max, capping to %d", num, int64(math.MaxInt64))
 		capped = uint64(math.MaxInt64)
 	}
-	nm.wrapped.Add(nm.ctx, int64(capped), metric.WithAttributes(nm.attributes...)) //nolint:gose
+	nm.wrapped.Add(nm.ctx, int64(capped), metric.WithAttributes(nm.attributes...)) //nolint:gosec
 }
 
 type openTelemetryMeterValueRecorder struct {
@@ -133,5 +133,5 @@ func (nm *openTelemetryMeterValueRecorder) RecordValue(val uint64) {
 		log.Printf("RecordValue: value %d exceeds int64 max, capping to %d", val, int64(math.MaxInt64))
 		capped = uint64(math.MaxInt64)
 	}
-	nm.wrapped.Record(nm.ctx, int64(capped), metric.WithAttributes(nm.attributes...)) //nolint:gose
+	nm.wrapped.Record(nm.ctx, int64(capped), metric.WithAttributes(nm.attributes...)) //nolint:gosec
 }
