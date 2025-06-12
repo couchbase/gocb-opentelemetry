@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  couchbase:
+    image: couchbase:community-7.6.2
+    container_name: couchbase
+    ports:
+      - "8091-8096:8091-8096"
+      - "11210:11210"
+    environment:
+      - COUCHBASE_ADMINISTRATOR_USERNAME=Administrator
+      - COUCHBASE_ADMINISTRATOR_PASSWORD=password
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8091/pools"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    command: >
+      sh -c "
+        /entrypoint.sh couchbase-server &&
+        sleep 20 &&
+        couchbase-cli cluster-init -c 127.0.0.1 --cluster-username=Administrator --cluster-password=password --services=data,index,query --cluster-ramsize=512 --cluster-index-ramsize=256 &&
+        couchbase-cli bucket-create -c 127.0.0.1 -u Administrator -p password --bucket=default --bucket-type=couchbase --bucket-ramsize=256 --wait
+      "

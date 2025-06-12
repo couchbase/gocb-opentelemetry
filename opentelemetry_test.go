@@ -180,10 +180,6 @@ func TestOpenTelemetryTracer(t *testing.T) {
 			Key:   "net.peer.port",
 			Value: attribute.StringValue(""),
 		},
-		{
-			Key:   "db.couchbase.server_duration",
-			Value: attribute.StringValue(""),
-		},
 	})
 }
 
@@ -256,10 +252,11 @@ func assertOTSpan(t *testing.T, span tracetest.SpanStub, name string, attribs []
 }
 
 func assertOTMetric(t *testing.T, metric metricdata.HistogramDataPoint[int64], name string) {
-	require.EqualValues(t, metric.Attributes.Len(), 2)
+	require.EqualValues(t, metric.Attributes.Len(), 6)
 	expectedKeys := []attribute.KeyValue{
 		attribute.String("db.couchbase.service", "kv"),
 		attribute.String("db.operation", name),
+		attribute.String("db.name", "default"),
 	}
 
 	for _, val := range expectedKeys {

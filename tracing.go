@@ -39,8 +39,8 @@ func (tracer *OpenTelemetryRequestTracer) RequestSpan(parentContext gocb.Request
 	if ctx, ok := parentContext.(context.Context); ok {
 		parentCtx = ctx
 	}
-
-	return NewOpenTelemetryRequestSpan(tracer.wrapped.Start(parentCtx, operationName))
+	ctx, span := tracer.wrapped.Start(parentCtx, operationName)
+	return NewOpenTelemetryRequestSpan(ctx, span)
 }
 
 // OpenTelemetryRequestSpan is an implementation of the gocb Span interface which wraps an OpenTelemetry span.
