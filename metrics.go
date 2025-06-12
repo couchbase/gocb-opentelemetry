@@ -3,6 +3,8 @@ package gocbopentelemetry
 import (
 	"context"
 	"fmt"
+	"log"
+	"math"
 	"sync"
 
 	"github.com/couchbase/gocb/v2"
@@ -100,7 +102,12 @@ func newOpenTelemetryCounter(ctx context.Context, counter metric.Int64Counter, a
 }
 
 func (nm *openTelemetryCounter) IncrementBy(num uint64) {
-	nm.wrapped.Add(nm.ctx, int64(num), metric.WithAttributes(nm.attributes...))
+	capped := num
+	if num > uint64(math.MaxInt64) {
+		log.Printf("IncrementBy: value %d exceeds int64 max, capping to %d", num, int64(math.MaxInt64))
+		capped = uint64(math.MaxInt64)
+	}
+	nm.wrapped.Add(nm.ctx, int64(capped), metric.WithAttributes(nm.attributes...))
 }
 
 type openTelemetryMeterValueRecorder struct {
@@ -118,7 +125,13 @@ func newOpenTelemetryValueRecorder(ctx context.Context, valueRecorder metric.Int
 }
 
 func (nm *openTelemetryMeterValueRecorder) RecordValue(val uint64) {
-	if val > 0 {
-		nm.wrapped.Record(nm.ctx, int64(val), metric.WithAttributes(nm.attributes...))
+	if val == 0 {
+		return
 	}
+	capped := val
+	if val > uint64(math.MaxInt64) {
+		log.Printf("RecordValue: value %d exceeds int64 max, capping to %d", val, int64(math.MaxInt64))
+		capped = uint64(math.MaxInt64)
+	}
+	nm.wrapped.Record(nm.ctx, int64(capped), metric.WithAttributes(nm.attributes...))
 }
