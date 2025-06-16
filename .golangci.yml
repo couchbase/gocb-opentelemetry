@@ -2,13 +2,23 @@ run:
   tests: false
 linters:
   enable:
-    - golint
     - gosec
     - unconvert
-linters-settings:
-  golint:
-    set-exit-status: true
-    min-confidence: 0.81
-  errcheck:
-    check-type-assertions: true
-    check-blank: true
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+formatters:
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

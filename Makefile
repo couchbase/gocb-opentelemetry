@@ -1,11 +1,14 @@
 devsetup:
-	go get github.com/golangci/golangci-lint/cmd/golangci-lint@v1.39.0
+	go get github.com/golangci/golangci-lint/cmd/golangci-lint@v1.55.0
 
 test:
 	go test -race ./...
 
 cover:
 	go test -coverprofile=cover.out ./...
+
+infra:
+	docker compose up
 
 lint:
 	golangci-lint run -v
