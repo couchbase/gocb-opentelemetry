@@ -5,7 +5,7 @@ go 1.23.0
 toolchain go1.24.1
 
 require (
-	github.com/couchbase/gocb/v2 v2.10.0
+	github.com/couchbase/gocb/v2 v2.10.1
 	github.com/stretchr/testify v1.10.0
 	go.opentelemetry.io/otel v1.36.0
 	go.opentelemetry.io/otel/metric v1.36.0
@@ -15,7 +15,7 @@ require (
 )
 
 require (
-	github.com/couchbase/gocbcore/v10 v10.7.0 // indirect
+	github.com/couchbase/gocbcore/v10 v10.7.1 // indirect
 	github.com/couchbase/gocbcoreps v0.1.3 // indirect
 	github.com/couchbase/goprotostellar v1.0.2 // indirect
 	github.com/couchbaselabs/gocbconnstr/v2 v2.0.0-20240607131231-fb385523de28 // indirect
