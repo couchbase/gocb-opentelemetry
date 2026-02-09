@@ -2,14 +2,17 @@ package gocbopentelemetry
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"sort"
 	"testing"
 	"time"
 
 	"github.com/couchbase/gocb/v2"
+	"github.com/couchbase/gocbcore/v10"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel"
@@ -18,6 +21,7 @@ import (
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	"go.opentelemetry.io/otel/trace"
 )
 
 func envFlagString(envName, name, value, usage string) *string {
@@ -26,6 +30,48 @@ func envFlagString(envName, name, value, usage string) *string {
 		value = envValue
 	}
 	return flag.String(name, value, usage)
+}
+
+type clusterLabels struct {
+	ClusterName string `json:"clusterName"`
+	ClusterUuid string `json:"clusterUUID"`
+}
+
+func getClusterLabels(cluster *gocb.Cluster) (*clusterLabels, error) {
+	agent, err := cluster.Bucket(bucket).Internal().IORouter()
+	if err != nil {
+		return nil, err
+	}
+	var res *clusterLabels
+	var ch = make(chan struct{})
+	var errOut error
+	_, err = agent.DoHTTPRequest(&gocbcore.HTTPRequest{
+		Service: gocbcore.MgmtService,
+		Method:  "GET",
+		Path:    "/pools/default/nodeServices",
+	}, func(resp *gocbcore.HTTPResponse, httpErr error) {
+		defer close(ch)
+		if httpErr != nil {
+			errOut = httpErr
+			return
+		}
+		var body []byte
+		body, errOut = io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if errOut != nil {
+			return
+		}
+		errOut = json.Unmarshal(body, &res)
+	})
+	if err != nil {
+		close(ch)
+		return nil, err
+	}
+	<-ch
+	if errOut != nil {
+		return nil, errOut
+	}
+	return res, nil
 }
 
 var server, user, password, bucket string
@@ -104,11 +150,22 @@ func TestOpenTelemetryTracer(t *testing.T) {
 		return spans[i].StartTime.Before(spans[j].StartTime)
 	})
 
-	assertOTSpan(t, spans[0], "myparentoperation", []attribute.KeyValue{})
-	assertOTSpan(t, spans[1], "upsert", []attribute.KeyValue{
+	labels, err := getClusterLabels(cluster)
+	require.Nil(t, err)
+
+	assertOTSpan(t, spans[0], "myparentoperation", trace.SpanKindUnspecified, []attribute.KeyValue{})
+	assertOTSpan(t, spans[1], "upsert", trace.SpanKindClient, []attribute.KeyValue{
 		{
 			Key:   "db.system",
 			Value: attribute.StringValue("couchbase"),
+		},
+		{
+			Key:   "db.couchbase.cluster_uuid",
+			Value: attribute.StringValue(labels.ClusterUuid),
+		},
+		{
+			Key:   "db.couchbase.cluster_name",
+			Value: attribute.StringValue(labels.ClusterName),
 		},
 		{
 			Key:   "db.couchbase.service",
@@ -131,13 +188,21 @@ func TestOpenTelemetryTracer(t *testing.T) {
 			Value: attribute.StringValue("upsert"),
 		},
 	})
-	assertOTSpan(t, spans[2], "request_encoding", []attribute.KeyValue{
+	assertOTSpan(t, spans[2], "request_encoding", trace.SpanKindClient, []attribute.KeyValue{
 		{
 			Key:   "db.system",
 			Value: attribute.StringValue("couchbase"),
 		},
+		{
+			Key:   "db.couchbase.cluster_uuid",
+			Value: attribute.StringValue(labels.ClusterUuid),
+		},
+		{
+			Key:   "db.couchbase.cluster_name",
+			Value: attribute.StringValue(labels.ClusterName),
+		},
 	})
-	assertOTSpan(t, spans[3], "CMD_SET", []attribute.KeyValue{
+	assertOTSpan(t, spans[3], "CMD_SET", trace.SpanKindClient, []attribute.KeyValue{
 		{
 			Key:   "db.system",
 			Value: attribute.StringValue("couchbase"),
@@ -146,11 +211,27 @@ func TestOpenTelemetryTracer(t *testing.T) {
 			Key:   "db.couchbase.retries",
 			Value: attribute.StringValue(""),
 		},
+		{
+			Key:   "db.couchbase.cluster_uuid",
+			Value: attribute.StringValue(labels.ClusterUuid),
+		},
+		{
+			Key:   "db.couchbase.cluster_name",
+			Value: attribute.StringValue(labels.ClusterName),
+		},
 	})
-	assertOTSpan(t, spans[4], "dispatch_to_server", []attribute.KeyValue{
+	assertOTSpan(t, spans[4], "dispatch_to_server", trace.SpanKindClient, []attribute.KeyValue{
 		{
 			Key:   "db.system",
 			Value: attribute.StringValue("couchbase"),
+		},
+		{
+			Key:   "db.couchbase.cluster_uuid",
+			Value: attribute.StringValue(labels.ClusterUuid),
+		},
+		{
+			Key:   "db.couchbase.cluster_name",
+			Value: attribute.StringValue(labels.ClusterName),
 		},
 		{
 			Key:   "net.transport",
@@ -179,6 +260,10 @@ func TestOpenTelemetryTracer(t *testing.T) {
 		{
 			Key:   "net.peer.port",
 			Value: attribute.StringValue(""),
+		},
+		{
+			Key:   "db.couchbase.server_duration",
+			Value: attribute.IntValue(0),
 		},
 	})
 }
@@ -215,7 +300,8 @@ func TestOpenTelemetryMeter(t *testing.T) {
 	require.Nil(t, err)
 
 	var data metricdata.ResourceMetrics
-	_ = rdr.Collect(context.Background(), &data)
+	err = rdr.Collect(context.Background(), &data)
+	require.Nil(t, err)
 
 	require.Len(t, data.ScopeMetrics, 1)
 	require.Len(t, data.ScopeMetrics[0].Metrics, 1)
@@ -223,14 +309,20 @@ func TestOpenTelemetryMeter(t *testing.T) {
 	histogram, ok := data.ScopeMetrics[0].Metrics[0].Data.(metricdata.Histogram[int64])
 	require.True(t, ok)
 
-	assertOTMetric(t, histogram.DataPoints[0], "upsert")
-	assertOTMetric(t, histogram.DataPoints[1], "get")
+	labels, err := getClusterLabels(cluster)
+	require.Nil(t, err)
+
+	assertOTMetric(t, histogram.DataPoints[0], "upsert", labels)
+	assertOTMetric(t, histogram.DataPoints[1], "get", labels)
 }
 
-func assertOTSpan(t *testing.T, span tracetest.SpanStub, name string, attribs []attribute.KeyValue) {
+func assertOTSpan(t *testing.T, span tracetest.SpanStub, name string, kind trace.SpanKind, attribs []attribute.KeyValue) {
 	assert.NotZero(t, span.StartTime)
 	assert.NotZero(t, span.EndTime)
 	assert.Equal(t, name, span.Name)
+	if kind != trace.SpanKindUnspecified {
+		assert.Equal(t, kind, span.SpanKind)
+	}
 
 	require.Len(t, span.Attributes, len(attribs))
 	for _, attrib := range attribs {
@@ -251,12 +343,17 @@ func assertOTSpan(t *testing.T, span tracetest.SpanStub, name string, attribs []
 	}
 }
 
-func assertOTMetric(t *testing.T, metric metricdata.HistogramDataPoint[int64], name string) {
-	require.EqualValues(t, metric.Attributes.Len(), 6)
+func assertOTMetric(t *testing.T, metric metricdata.HistogramDataPoint[int64], name string, labels *clusterLabels) {
+	require.Equal(t, 8, metric.Attributes.Len())
 	expectedKeys := []attribute.KeyValue{
 		attribute.String("db.couchbase.service", "kv"),
 		attribute.String("db.operation", name),
-		attribute.String("db.name", "default"),
+		attribute.String("db.name", bucket),
+		attribute.String("db.couchbase.scope", "_default"),
+		attribute.String("db.couchbase.collection", "_default"),
+		attribute.String("db.couchbase.cluster_name", labels.ClusterName),
+		attribute.String("db.couchbase.cluster_uuid", labels.ClusterUuid),
+		attribute.String("outcome", "Success"),
 	}
 
 	for _, val := range expectedKeys {
@@ -266,4 +363,41 @@ func assertOTMetric(t *testing.T, metric metricdata.HistogramDataPoint[int64], n
 	}
 
 	require.EqualValues(t, metric.Count, 1)
+}
+
+func TestOpenTelemetryMetricsInSeconds(t *testing.T) {
+	rdr := metric.NewManualReader()
+
+	provider := metric.NewMeterProvider(
+		metric.WithReader(rdr),
+	)
+
+	meter := NewOpenTelemetryMeter(provider)
+	recorder, err := meter.ValueRecorder("test_recorder", map[string]string{
+		"foo":    "bar",
+		"__unit": "s",
+	})
+	require.Nil(t, err)
+
+	recorder.RecordValue(2_000_000)
+	recorder.RecordValue(500_000)
+
+	var data metricdata.ResourceMetrics
+	err = rdr.Collect(context.Background(), &data)
+	require.Nil(t, err)
+
+	require.Len(t, data.ScopeMetrics, 1)
+	require.Len(t, data.ScopeMetrics[0].Metrics, 1)
+	require.Equal(t, "s", data.ScopeMetrics[0].Metrics[0].Unit)
+
+	histogram, ok := data.ScopeMetrics[0].Metrics[0].Data.(metricdata.Histogram[float64])
+	require.True(t, ok)
+
+	require.Len(t, histogram.DataPoints, 1)
+
+	dataPoint := histogram.DataPoints[0]
+	assert.Equal(t, 2.5, dataPoint.Sum)
+	assert.Equal(t, uint64(2), dataPoint.Count)
+
+	assert.Equal(t, attribute.NewSet(attribute.String("foo", "bar")), dataPoint.Attributes)
 }

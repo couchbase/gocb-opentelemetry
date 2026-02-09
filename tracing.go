@@ -39,7 +39,7 @@ func (tracer *OpenTelemetryRequestTracer) RequestSpan(parentContext gocb.Request
 	if ctx, ok := parentContext.(context.Context); ok {
 		parentCtx = ctx
 	}
-	ctx, span := tracer.wrapped.Start(parentCtx, operationName)
+	ctx, span := tracer.wrapped.Start(parentCtx, operationName, trace.WithSpanKind(trace.SpanKindClient))
 	return NewOpenTelemetryRequestSpan(ctx, span)
 }
 

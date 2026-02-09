@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"strings"
 	"sync"
 
 	"github.com/couchbase/gocb/v2"
@@ -15,8 +16,8 @@ import (
 // OpenTelemetryMeter is an implementation of the gocb Meter interface which wraps an OpenTelemetry meter.
 type OpenTelemetryMeter struct {
 	wrapped       metric.Meter
-	counterCache  map[string]*openTelemetryCounter
-	recorderCache map[string]*openTelemetryMeterValueRecorder
+	counterCache  map[string]gocb.Counter
+	recorderCache map[string]gocb.ValueRecorder
 	lock          sync.Mutex
 	provider      metric.MeterProvider
 }
@@ -25,8 +26,8 @@ type OpenTelemetryMeter struct {
 func NewOpenTelemetryMeter(provider metric.MeterProvider) *OpenTelemetryMeter {
 	return &OpenTelemetryMeter{
 		wrapped:       provider.Meter("com.couchbase.client/go"),
-		counterCache:  make(map[string]*openTelemetryCounter),
-		recorderCache: make(map[string]*openTelemetryMeterValueRecorder),
+		counterCache:  make(map[string]gocb.Counter),
+		recorderCache: make(map[string]gocb.ValueRecorder),
 		provider:      provider,
 	}
 }
@@ -67,23 +68,40 @@ func (meter *OpenTelemetryMeter) Counter(name string, tags map[string]string) (g
 // ValueRecorder provides a wrapped OpenTelemetry ValueRecorder.
 func (meter *OpenTelemetryMeter) ValueRecorder(name string, tags map[string]string) (gocb.ValueRecorder, error) {
 	key := fmt.Sprintf("%s-%s", name, tags)
+
 	meter.lock.Lock()
+	defer meter.lock.Unlock()
+
 	recorder := meter.recorderCache[key]
 	if recorder == nil {
-		otRecorder, err := meter.wrapped.Int64Histogram(name)
-		if err != nil {
-			meter.lock.Unlock()
-			return nil, err
-		}
+		unit := tags["__unit"]
+
 		var labels []attribute.KeyValue
 		for k, v := range tags {
+			if strings.HasPrefix(k, "__") {
+				// Ignore any 'reserved' attributes, such as `__unit`
+				continue
+			}
 			labels = append(labels, attribute.String(k, v))
 		}
-		recorder = newOpenTelemetryValueRecorder(context.Background(), otRecorder, labels)
+
+		switch unit {
+		case "s":
+			otelHistogram, err := meter.wrapped.Float64Histogram(name, metric.WithUnit("s"))
+			if err != nil {
+				return nil, err
+			}
+			recorder = newOpenTelemetryMeterSecondsValueRecorder(context.Background(), otelHistogram, labels)
+		default:
+			otelHistogram, err := meter.wrapped.Int64Histogram(name)
+			if err != nil {
+				return nil, err
+			}
+			recorder = newOpenTelemetryMeterDefaultValueRecorder(context.Background(), otelHistogram, labels)
+		}
+
 		meter.recorderCache[key] = recorder
 	}
-	meter.lock.Unlock()
-
 	return recorder, nil
 }
 
@@ -110,21 +128,21 @@ func (nm *openTelemetryCounter) IncrementBy(num uint64) {
 	nm.wrapped.Add(nm.ctx, int64(capped), metric.WithAttributes(nm.attributes...)) //nolint:gosec
 }
 
-type openTelemetryMeterValueRecorder struct {
+type openTelemetryMeterDefaultValueRecorder struct {
 	ctx        context.Context
 	wrapped    metric.Int64Histogram
 	attributes []attribute.KeyValue
 }
 
-func newOpenTelemetryValueRecorder(ctx context.Context, valueRecorder metric.Int64Histogram, attributes []attribute.KeyValue) *openTelemetryMeterValueRecorder {
-	return &openTelemetryMeterValueRecorder{
+func newOpenTelemetryMeterDefaultValueRecorder(ctx context.Context, valueRecorder metric.Int64Histogram, attributes []attribute.KeyValue) *openTelemetryMeterDefaultValueRecorder {
+	return &openTelemetryMeterDefaultValueRecorder{
 		ctx:        ctx,
 		wrapped:    valueRecorder,
 		attributes: attributes,
 	}
 }
 
-func (nm *openTelemetryMeterValueRecorder) RecordValue(val uint64) {
+func (nm *openTelemetryMeterDefaultValueRecorder) RecordValue(val uint64) {
 	if val == 0 {
 		return
 	}
@@ -134,4 +152,26 @@ func (nm *openTelemetryMeterValueRecorder) RecordValue(val uint64) {
 		capped = uint64(math.MaxInt64)
 	}
 	nm.wrapped.Record(nm.ctx, int64(capped), metric.WithAttributes(nm.attributes...)) //nolint:gosec
+}
+
+type openTelemetryMeterSecondsValueRecorder struct {
+	ctx        context.Context
+	wrapped    metric.Float64Histogram
+	attributes []attribute.KeyValue
+}
+
+func newOpenTelemetryMeterSecondsValueRecorder(ctx context.Context, valueRecorder metric.Float64Histogram, attributes []attribute.KeyValue) *openTelemetryMeterSecondsValueRecorder {
+	return &openTelemetryMeterSecondsValueRecorder{
+		ctx:        ctx,
+		wrapped:    valueRecorder,
+		attributes: attributes,
+	}
+}
+
+func (nm *openTelemetryMeterSecondsValueRecorder) RecordValue(val uint64) {
+	if val == 0 {
+		return
+	}
+	// Values are provided by the SDK in microseconds, we must convert them to seconds
+	nm.wrapped.Record(nm.ctx, float64(val)/1_000_000, metric.WithAttributes(nm.attributes...)) //nolint:gosec
 }
