@@ -1,5 +1,5 @@
 devsetup:
-	go get github.com/golangci/golangci-lint/cmd/golangci-lint@v1.55.0
+	go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0
 
 test:
 	go test -race ./...
