@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"math"
 	"time"
 
 	"github.com/couchbase/gocb/v2"
@@ -98,6 +99,10 @@ func (span *OpenTelemetryRequestSpan) SetAttribute(key string, value interface{}
 		span.wrapped.SetAttributes(attribute.Int(key, int(v)))
 	case *uint32:
 		span.wrapped.SetAttributes(attribute.Int(key, int(*v)))
+	case uint64:
+		span.wrapped.SetAttributes(attribute.Int64(key, uint64ToInt64(v)))
+	case *uint64:
+		span.wrapped.SetAttributes(attribute.Int64(key, uint64ToInt64(*v)))
 	case float64:
 		span.wrapped.SetAttributes(attribute.Float64(key, v))
 	case *float64:
@@ -118,6 +123,15 @@ func (span *OpenTelemetryRequestSpan) SetAttribute(key string, value interface{}
 		// This isn't great but we should make some effort to output some sort of warning.
 		log.Println("Unable to determine value as a type that we can handle")
 	}
+}
+
+// uint64ToInt64 converts a uint64 to an int64, capping at math.MaxInt64 as OpenTelemetry
+// does not support unsigned 64-bit attribute values.
+func uint64ToInt64(v uint64) int64 {
+	if v > math.MaxInt64 {
+		return math.MaxInt64
+	}
+	return int64(v)
 }
 
 // AddEvent adds an event to this span.
